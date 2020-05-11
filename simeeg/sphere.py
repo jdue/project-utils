@@ -1,6 +1,7 @@
 """
 Various tools for working with spheres.
 
+- Generate equally spaced points on a unit sphere.
 - Vectorized analytical solutions for leadfields in one and three layer
   spheres.
 - Sampling normally distributed points around a (seed) point on a sphere
@@ -8,8 +9,82 @@ Various tools for working with spheres.
 
 from numbers import Integral
 import numpy as np
+from scipy.spatial import ConvexHull
 
 nax = np.newaxis
+
+def generate_sphere(N, r=1):
+    """Generates a triangulated sphere with N vertices and radius r centered on
+    (0,0,0). 
+    """
+    pts = fibonacci_sphere(N) * r
+    hull = ConvexHull(pts)
+    pts, tri = hull.points, hull.simplices
+    orientation_consistency(pts, tri)
+    return dict(pts=pts, tri=tri)
+
+def fibonacci_sphere(N):
+    """
+    http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
+
+    see fig. 1 for choice of 'best' epsilon (maximizer of minimum distance)
+
+    """
+
+    if N < 30:
+        epsilon = 0.
+    elif N < 150:
+        epsilon = 2.
+    else:
+        epsilon = 2.5
+
+    phi = 0.5 * (1 + np.sqrt(5)) # the golden ratio 
+    i = np.arange(0, N, dtype=float)
+
+    # Fibonacci grid
+    x2 = (i + 0.5 + epsilon) / (N + 2*epsilon)
+    y2 = i * phi
+    if N >= 30:
+        x2[0], y2[0] = 0, 0
+        x2[-1], y2[-1] = 1, 0
+
+    # Fibonacci sphere
+    # phi   : latitude (from pole to pole, 0 <= phi <= pi)
+    # theta : longitude (around sphere, 0 <= theta <= 2*pi)
+
+    # spherical coordinates (r = 1 is implicit because it is unit sphere)
+    phi = np.arccos(1 - 2*x2)
+    theta = 2*np.pi*y2
+
+    # cartesian coordinates
+    x3 = np.cos(theta) * np.sin(phi)
+    y3 = np.sin(theta) * np.sin(phi)
+    z3 = np.cos(phi)
+
+    return np.array([x3,y3,z3]).T
+    
+def orientation_consistency(pts, tri):
+    """Fix orientation of normals so that they all point outwards.
+    
+    Operates in-place on tri.
+    """
+    # centroid_tri: vector from global centroid to centroid of each triangle
+    # (in this case the global centroid is [0,0,0] and so can be ignored)
+    centroid_tri = pts[tri].mean(1)
+    n = compute_triangle_normals(pts, tri)
+    orientation = np.sum(centroid_tri * n, axis=1)
+    swap_select_columns(tri, orientation < 0, 1, 2)
+
+def compute_triangle_normals(pts, tri):
+    n = np.cross(pts[tri[:,1]]-pts[tri[:,0]],
+                 pts[tri[:,2]]-pts[tri[:,0]])
+    n /= np.linalg.norm(n, axis=1, keepdims=True)
+    return n
+
+def swap_select_columns(arr, sel, c1, c2):
+    sw = arr[sel]
+    sw[:, [c1, c2]] = sw[:, [c2, c1]]
+    arr[sel] = sw
 
 def cart_to_sph(points):
     """
